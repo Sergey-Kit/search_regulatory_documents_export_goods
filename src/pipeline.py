@@ -187,11 +187,15 @@ def run(cfg: Config) -> Path:
         cand = candidates[i]
         h = hybrid_scores[i][cand]
         h_norm = (h - h.min()) / (h.max() - h.min() + 1e-9)
-        # Переранжированные кандидаты: (sigmoid(logit) + λ·гибрид) / (1 + λ) — в (0, 1];
-        # остальные — ниже любого переранжированного, в гибридном порядке (score в (-1, 0)).
         reranked = ~np.isnan(logits[i])
-        score = np.where(reranked, (_sigmoid(np.nan_to_num(logits[i])) + cfg.lam * h_norm) / (1 + cfg.lam),
-                         h_norm - 1.0)
+        if not reranked.any():
+            # Без реранкера score — нормированный RRF-score гибрида в [0, 1].
+            score = h_norm
+        else:
+            # Переранжированные кандидаты: (sigmoid(logit) + λ·гибрид) / (1 + λ) — в (0, 1];
+            # остальные — ниже любого переранжированного, в гибридном порядке (score в (-1, 0)).
+            score = np.where(reranked, (_sigmoid(np.nan_to_num(logits[i])) + cfg.lam * h_norm) / (1 + cfg.lam),
+                             h_norm - 1.0)
         order = np.argsort(-score, kind="stable")
         chosen = cand[order][:TOP_N]
         chosen_scores = score[order][:TOP_N]

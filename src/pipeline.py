@@ -25,13 +25,14 @@ class Config:
     device: str = "cpu"
     rerank_k: int = 40
     time_budget_s: float = 1200.0
-    use_tnved: bool = True
+    use_tnved: bool = False        # ТН ВЭД-обогащение запроса: на dev ухудшает качество, выключено
     tnved_top: int = 5
     w_bm25: float = 1.0
-    w_dense: float = 1.0
+    w_dense: float = 1.0           # вес каждого из двух dense-списков (полный запрос и «голова»)
     w_tnved: float = 0.5           # вес каждого из двух ТН ВЭД-списков в RRF
     rrf_k: int = 60
-    lam: float = 0.1               # вклад гибридного ранга в итоговый score
+    head_chars: int = 250          # «голова» декларации: название товара обычно в начале, хвост — шум
+    lam: float = 0.1               # вклад гибридного ранга в итоговый score (tie-break)
     rerank_query_tnved: bool = False  # добавлять ли ТН ВЭД-расширение в запрос реранкера
     skip_rerank: bool = False
     fp16: bool = False
@@ -94,9 +95,14 @@ def run(cfg: Config) -> Path:
              len(decls), len(docs), sum(len(d.ref_texts) for d in docs))
 
     q_norm = [preprocess.normalize(d["G31_1"]) for d in decls]
+    q_head = [q[:cfg.head_chars] for q in q_norm]
     q_lem = [preprocess.lemmas(d["G31_1"]) for d in decls]
     doc_bm25 = [preprocess.lemmas(d.text_for_bm25()) for d in docs]
-    doc_model = [d.text_for_model() for d in docs]
+    # Dense: только текст позиции. Название указа в префиксе размывает эмбеддинг (проверено на dev).
+    doc_dense = [d.body for d in docs]
+    # Реранкер: текст позиции + разрешённые ссылки; запрос — «голова» декларации, иначе при окне
+    # 512 токенов усечение longest_first съедает текст позиции.
+    doc_rerank = [d.text_for_bm25() for d in docs]
     t0 = _timer("препроцессинг", t0)
 
     bm25 = BM25(doc_bm25)
@@ -106,10 +112,15 @@ def run(cfg: Config) -> Path:
     expansions = tnved_expansions(cfg, encoder, q_norm, q_lem) if cfg.use_tnved else [""] * len(decls)
     t0 = time.perf_counter()
 
-    doc_emb = encoder.encode(doc_model, show_progress=False)
+    doc_emb = encoder.encode(doc_dense, show_progress=False)
     q_emb = encoder.encode(q_norm)
+    qh_emb = encoder.encode(q_head)
     exp_emb = encoder.encode(expansions) if cfg.use_tnved else None
     encoder.close()
+    del encoder
+    if cfg.device.startswith("cuda"):
+        import torch
+        log.info("VRAM после выгрузки энкодера: %.2f ГБ", torch.cuda.memory_allocated() / 2**30)
     t0 = _timer("dense-поиск по НПА", t0)
 
     n_docs = len(docs)
@@ -119,13 +130,14 @@ def run(cfg: Config) -> Path:
     for i in range(len(decls)):
         s_bm25 = bm25.scores(q_lem[i])
         s_dense = q_emb[i] @ doc_emb.T
-        lists = [(s_bm25, cfg.w_bm25), (s_dense, cfg.w_dense)]
+        s_dense_h = qh_emb[i] @ doc_emb.T
+        lists = [(s_bm25, cfg.w_bm25), (s_dense, cfg.w_dense), (s_dense_h, cfg.w_dense)]
         if cfg.use_tnved and expansions[i]:
             lists.append((bm25.scores(preprocess.lemmas(expansions[i])), cfg.w_tnved))
             lists.append((exp_emb[i] @ doc_emb.T, cfg.w_tnved))
         fused = rrf(lists, k=cfg.rrf_k)
         per_method["bm25"].append(topk(s_bm25, 50))
-        per_method["dense"].append(topk(s_dense, 50))
+        per_method["dense"].append(topk(rrf([(s_dense, 1.0), (s_dense_h, 1.0)], k=cfg.rrf_k), 50))
         per_method["hybrid"].append(topk(fused, 50))
         candidates.append(topk(fused, max(cfg.rerank_k, TOP_N)))
         hybrid_scores.append(fused)
@@ -136,9 +148,9 @@ def run(cfg: Config) -> Path:
     else:
         reranker = Reranker(str(cfg.models_dir / "bge-reranker-v2-m3"), cfg.device, fp16=cfg.fp16)
         t0 = _timer("загрузка реранкера", t0)
-        rq = [q + (" " + e if cfg.rerank_query_tnved and e else "") for q, e in zip(q_norm, expansions)]
+        rq = [q + (" " + e if cfg.rerank_query_tnved and e else "") for q, e in zip(q_head, expansions)]
         elapsed = time.perf_counter() - t_start
-        logits = rerank_all(reranker, rq, candidates, doc_model, max(60.0, cfg.time_budget_s - elapsed))
+        logits = rerank_all(reranker, rq, candidates, doc_rerank, max(60.0, cfg.time_budget_s - elapsed))
         t0 = _timer("реранкинг", t0)
 
     rows = []

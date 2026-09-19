@@ -32,7 +32,7 @@ def main() -> int:
     p.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
     p.add_argument("--rerank-k", type=int, default=None, help="глубина реранкинга (по умолчанию 40 на GPU, 20 на CPU)")
     p.add_argument("--time-budget", type=float, default=1200.0, help="общий бюджет времени на реранкинг, с")
-    p.add_argument("--no-tnved", action="store_true", help="отключить ТН ВЭД-обогащение запроса")
+    p.add_argument("--tnved", action="store_true", help="включить ТН ВЭД-обогащение запроса (по умолчанию выключено)")
     p.add_argument("--no-rerank", action="store_true", help="только гибридный поиск (для абляций)")
     p.add_argument("--w-tnved", type=float, default=0.5)
     p.add_argument("--lam", type=float, default=0.1)
@@ -64,7 +64,7 @@ def main() -> int:
     cfg = Config(
         root=Path(a.data), out_dir=Path(a.out), models_dir=models_dir, device=device,
         rerank_k=a.rerank_k or (40 if device == "cuda" else 20), time_budget_s=a.time_budget,
-        use_tnved=not a.no_tnved, w_tnved=a.w_tnved, lam=a.lam,
+        use_tnved=a.tnved, w_tnved=a.w_tnved, lam=a.lam,
         rerank_query_tnved=a.rerank_query_tnved, skip_rerank=a.no_rerank, fp16=a.fp16,
     )
     run(cfg)

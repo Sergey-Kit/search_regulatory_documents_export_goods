@@ -1,0 +1,14 @@
+# Версии зафиксированы по окружению, в котором получен out/predictions.csv
+# (Python 3.10.12, Linux x86_64). torch — сборка с CUDA 12.1; CPU-сборка работает так же.
+numpy==1.26.4
+pandas==1.5.2
+torch==2.2.1
+transformers==4.46.0
+sentence-transformers==3.2.1
+huggingface-hub==0.26.1
+tokenizers==0.20.1
+safetensors==0.4.5
+pymorphy3==2.0.6
+pymorphy3-dicts-ru==2.4.417150.4580142
+tqdm==4.66.5
+pytest==8.3.3

@@ -34,6 +34,7 @@ def main() -> int:
     p.add_argument("--time-budget", type=float, default=1200.0, help="общий бюджет времени на реранкинг, с")
     p.add_argument("--tnved", action="store_true", help="включить ТН ВЭД-обогащение запроса (по умолчанию выключено)")
     p.add_argument("--no-rerank", action="store_true", help="только гибридный поиск (для абляций)")
+    p.add_argument("--no-second-encoder", action="store_true", help="без второго dense-энкодера RoSBERTa (абляция)")
     p.add_argument("--w-tnved", type=float, default=0.5)
     p.add_argument("--lam", type=float, default=0.1)
     p.add_argument("--rerank-query-tnved", action="store_true")
@@ -56,7 +57,7 @@ def main() -> int:
     logging.info("устройство: %s, torch %s", device, torch.__version__)
 
     models_dir = Path(a.models)
-    for name in ("user-bge-m3", "bge-reranker-v2-m3"):
+    for name in ("user-bge-m3", "bge-reranker-v2-m3") + (() if a.no_second_encoder else ("ru-en-rosberta",)):
         if not (models_dir / name / "config.json").exists():
             logging.error("модель %s не найдена в %s — выполните `python prepare.py`", name, models_dir)
             return 2
@@ -66,6 +67,7 @@ def main() -> int:
         rerank_k=a.rerank_k, time_budget_s=a.time_budget,
         use_tnved=a.tnved, w_tnved=a.w_tnved, lam=a.lam,
         rerank_query_tnved=a.rerank_query_tnved, skip_rerank=a.no_rerank, fp16=a.fp16,
+        use_second_encoder=not a.no_second_encoder,
     )
     run(cfg)
     return 0

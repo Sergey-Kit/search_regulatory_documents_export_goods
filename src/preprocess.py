@@ -86,3 +86,31 @@ def lemmas(text: str) -> list[str]:
     toks = _TOKEN.findall(text)
     toks = merge_split_words(toks)
     return [lemma(t) for t in toks if t not in _STOP and len(t) > 1]
+
+
+_SEG_SPLIT = re.compile(r"[:;]|\.\s|(?<=\D)\.(?=\s)")
+# Служебные преамбулы, за которыми название товара идёт дальше.
+_JUNK_HEAD = re.compile(r"имуществ|перечн|по лиц|код списка|позиция списка|кат\.?\s?пвн|^\d+[\d.]*\s*$|^\s*\d+\.\d\s")
+_NAME_MAX = 120
+_NAME_MIN = 30
+
+
+def product_name(text: str) -> str:
+    """Наименование товара: первый содержательный сегмент нормализованного описания.
+
+    Декларанты начинают описание с наименования в стиле ТН ВЭД («НАСОСЫ МОЛЕКУЛЯРНЫЕ
+    (ВАКУУМНЫЕ), ПРОМЫШЛЕННЫЕ: …»). Служебные преамбулы («5.2 ИМУЩЕСТВО ПО ПЕРЕЧНЮ №…:»)
+    пропускаются; слишком короткий сегмент («ВАЛЫ:») дополняется следующим.
+    """
+    q = normalize(text)
+    segs = [s.strip(" ,-\"'") for s in _SEG_SPLIT.split(q)]
+    segs = [s for s in segs if s]
+    if not segs:
+        return q[:_NAME_MAX]
+    i = 0
+    while i < len(segs) - 1 and _JUNK_HEAD.search(segs[i]):
+        i += 1
+    name = segs[i]
+    if len(name) < _NAME_MIN and i + 1 < len(segs):
+        name = name + ": " + segs[i + 1]
+    return name[:_NAME_MAX]

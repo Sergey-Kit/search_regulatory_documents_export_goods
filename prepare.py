@@ -12,9 +12,10 @@ ROOT = Path(__file__).resolve().parent
 MODELS = {
     "user-bge-m3": ("deepvk/USER-bge-m3", "0cc6cfe48e260fb0474c753087a69369e88709ae"),
     "bge-reranker-v2-m3": ("BAAI/bge-reranker-v2-m3", "953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e"),
+    "ru-en-rosberta": ("ai-forever/ru-en-RoSBERTa", "89fb1651989adbb1cfcfdedafd7d102951ad0555"),
 }
 FILES = ["config.json", "model.safetensors", "tokenizer.json", "tokenizer_config.json",
-         "special_tokens_map.json", "sentencepiece.bpe.model"]
+         "special_tokens_map.json", "sentencepiece.bpe.model", "vocab.json", "merges.txt"]
 
 
 def download_models(models_dir: Path) -> None:

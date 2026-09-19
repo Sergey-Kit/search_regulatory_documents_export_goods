@@ -16,7 +16,9 @@ variants = {"A": (q_full, [d.text_for_model() for d in docs]), "B": (q_full, [d.
             "C": (q_full, [d.body for d in docs]), "h": (q_head, [d.text_for_bm25() for d in docs]),
             "g": (q_head, [d.body for d in docs]),
             "i": ([q[:150] for q in q_full], [d.text_for_bm25() for d in docs]),
-            "j": ([q[:400] for q in q_full], [d.text_for_bm25() for d in docs])}
+            "j": ([q[:400] for q in q_full], [d.text_for_bm25() for d in docs]),
+            "n": ([preprocess.product_name(d["G31_1"]) for d in decs], [d.text_for_bm25() for d in docs]),
+            "m": ([preprocess.product_name(d["G31_1"]) + ". " + q[:250] for d, q in zip(decs, q_full)], [d.text_for_bm25() for d in docs])}
 rr = Reranker(str(ROOT / "models/bge-reranker-v2-m3"), "cuda", batch_size=int(sys.argv[2]) if len(sys.argv) > 2 else 8)
 for k in sys.argv[1]:
     t = time.perf_counter(); logits = {}; n = 0

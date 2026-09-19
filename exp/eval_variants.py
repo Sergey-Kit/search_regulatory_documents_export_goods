@@ -18,12 +18,15 @@ bmB = BM25([preprocess.lemmas(d.text_for_bm25()) for d in docs])
 bmC = BM25([preprocess.lemmas(d.body) for d in docs])
 D = {k: np.load(C / f"doc_{k}.npy") for k in "ABC"}
 Q = {"full": np.load(C / "q_full.npy"), "head": np.load(C / "q_head.npy"),
-     "head150": np.load(C / "q_head150.npy"), "head400": np.load(C / "q_head400.npy")}
+     "head150": np.load(C / "q_head150.npy"), "head400": np.load(C / "q_head400.npy"),
+     "name": np.load(C / "q_name.npy")}
+NAMES = json.load(open(C / "names.json"))
+ROS = {k: np.load(C / f"ros_{k}.npy") for k in ["doc_C", "doc_B", "q_full", "q_head"]}
 E = {k: np.load(C / f"exp_{k}.npy") for k in ["bm25", "dense", "rrf"]}
 EXP = json.load(open(C / "tnved_exp.json"))
 pool = {int(k): v for k, v in json.load(open(C / "pool.json")).items()}
 RR = {k: {int(i): np.array(v) for i, v in json.load(open(C / f"rerank_{k}.json")).items()}
-      for k in "ABChgij" if (C / f"rerank_{k}.json").exists()}
+      for k in "ABChgijnm" if (C / f"rerank_{k}.json").exists()}
 
 
 def sig(x): return 1 / (1 + np.exp(-x))
@@ -37,6 +40,14 @@ def run(cfg):
         lists = [(s_b, cfg["w_bm25"])]
         for qk in (["full", cfg.get("head", "head")] if cfg["q"] == "both" else [cfg["q"]]):
             lists.append((Q[qk][i] @ D[cfg["doc"]].T, cfg["w_dense"]))
+        if cfg.get("w_ros", 0) > 0:
+            rd = ROS["doc_" + cfg.get("ros_doc", "C")]
+            for qk in cfg.get("ros_q", ["q_full", "q_head"]):
+                lists.append((ROS[qk][i] @ rd.T, cfg["w_ros"]))
+        if cfg.get("w_name", 0) > 0:
+            lists.append((Q["name"][i] @ D[cfg["doc"]].T, cfg["w_name"]))
+        if cfg.get("w_name_bm25", 0) > 0:
+            lists.append((bm.scores(preprocess.lemmas(NAMES[i])), cfg["w_name_bm25"]))
         if cfg["w_tnved"] > 0:
             e = EXP[cfg["exp"]][i]
             lists.append((bm.scores(preprocess.lemmas(e)), cfg["w_tnved"]))

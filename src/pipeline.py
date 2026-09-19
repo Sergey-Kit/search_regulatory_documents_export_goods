@@ -29,6 +29,9 @@ class Config:
     tnved_top: int = 5
     w_bm25: float = 1.0
     w_dense: float = 1.0           # вес каждого из двух dense-списков (полный запрос и «голова»)
+    use_second_encoder: bool = True  # ru-en-RoSBERTa как второй dense: другая архитектура, другие ошибки
+    w_second: float = 1.0
+    second_encoder_budget_frac: float = 0.4  # пропустить второй энкодер, если первый съел больше этой доли бюджета
     w_tnved: float = 0.5           # вес каждого из двух ТН ВЭД-списков в RRF
     rrf_k: int = 60
     head_chars: int = 250          # «голова» декларации: название товара обычно в начале, хвост — шум
@@ -118,10 +121,26 @@ def run(cfg: Config) -> Path:
     exp_emb = encoder.encode(expansions) if cfg.use_tnved else None
     encoder.close()
     del encoder
+    t0 = _timer("dense-поиск по НПА (bge-m3)", t0)
+
+    use_second = cfg.use_second_encoder
+    if use_second and time.perf_counter() - t_start > cfg.second_encoder_budget_frac * cfg.time_budget_s:
+        log.warning("медленное устройство: первый энкодер занял %.0f с (> %.0f%% бюджета) — второй энкодер "
+                    "RoSBERTa пропущен, чтобы уложиться в лимит времени",
+                    time.perf_counter() - t_start, 100 * cfg.second_encoder_budget_frac)
+        use_second = False
+    if use_second:
+        # RoSBERTa обучена с префиксами задач; CLS-пулинг и нормализация — как у bge-m3.
+        enc2 = DenseEncoder(str(cfg.models_dir / "ru-en-rosberta"), cfg.device, fp16=cfg.fp16)
+        doc_emb2 = enc2.encode(["search_document: " + t for t in doc_dense])
+        q_emb2 = enc2.encode(["search_query: " + q for q in q_norm])
+        qh_emb2 = enc2.encode(["search_query: " + q for q in q_head])
+        enc2.close()
+        del enc2
+        t0 = _timer("dense-поиск по НПА (RoSBERTa)", t0)
     if cfg.device.startswith("cuda"):
         import torch
-        log.info("VRAM после выгрузки энкодера: %.2f ГБ", torch.cuda.memory_allocated() / 2**30)
-    t0 = _timer("dense-поиск по НПА", t0)
+        log.info("VRAM после выгрузки энкодеров: %.2f ГБ", torch.cuda.memory_allocated() / 2**30)
 
     n_docs = len(docs)
     per_method: dict[str, list[np.ndarray]] = {"bm25": [], "dense": [], "hybrid": []}
@@ -132,6 +151,9 @@ def run(cfg: Config) -> Path:
         s_dense = q_emb[i] @ doc_emb.T
         s_dense_h = qh_emb[i] @ doc_emb.T
         lists = [(s_bm25, cfg.w_bm25), (s_dense, cfg.w_dense), (s_dense_h, cfg.w_dense)]
+        if use_second:
+            lists.append((q_emb2[i] @ doc_emb2.T, cfg.w_second))
+            lists.append((qh_emb2[i] @ doc_emb2.T, cfg.w_second))
         if cfg.use_tnved and expansions[i]:
             lists.append((bm25.scores(preprocess.lemmas(expansions[i])), cfg.w_tnved))
             lists.append((exp_emb[i] @ doc_emb.T, cfg.w_tnved))

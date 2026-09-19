@@ -8,3 +8,4 @@ data/tnved_index.jsonl
 out/*.log
 exp/cache/
 exp/*.log
+submission*.zip

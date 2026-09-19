@@ -27,3 +27,23 @@ def test_rounds_and_rollback(monkeypatch):
     clock[0] = 0.0
     res = rerank_all(SlowFakeReranker(clock), ["q", "q"], cands, docs, time_budget_s=1e9, round_size=10)
     assert all(not np.isnan(r).any() for r in res)
+
+
+def test_early_abort_by_projection(monkeypatch):
+    clock = [0.0]
+    import src.rerank as rr
+    monkeypatch.setattr(rr.time, "perf_counter", lambda: clock[0])
+
+    class Slow:
+        calls = 0
+
+        def score(self, query, docs):
+            Slow.calls += 1
+            clock[0] += 100.0
+            return np.zeros(len(docs), dtype=np.float32)
+
+    docs = ["d"] * 20
+    cands = [np.arange(10)] * 20
+    # 20 деклараций по 100 «с» = 2000 > бюджет 1000: раунд прерывается после 5 проб, а не после 10
+    res = rerank_all(Slow(), ["q"] * 20, cands, docs, time_budget_s=1000.0, round_size=10)
+    assert Slow.calls == 5 and all(np.isnan(r).all() for r in res)

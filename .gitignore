@@ -6,3 +6,5 @@ tnved_knowledge.txt
 data/tnved_emb.npy
 data/tnved_index.jsonl
 out/*.log
+exp/cache/
+exp/*.log

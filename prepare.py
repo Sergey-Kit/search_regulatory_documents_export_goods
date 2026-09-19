@@ -1,7 +1,7 @@
 """Однократная подготовка окружения (разрешена сетью): модели → ./models, кэш ТН ВЭД → ./data.
 
-python prepare.py            # скачать модели (или скопировать из HF-кэша) и построить кэши
-python prepare.py --no-emb   # без предрасчёта эмбеддингов ТН ВЭД (тогда они считаются при запуске)
+python prepare.py            # скачать модели (или скопировать из HF-кэша), построить индекс ТН ВЭД
+python prepare.py --tnved    # дополнительно предрассчитать эмбеддинги ТН ВЭД (нужны только для run.py --tnved)
 """
 import argparse
 import json
@@ -57,8 +57,8 @@ def build_tnved_cache(with_emb: bool) -> None:
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
-    p.add_argument("--no-emb", action="store_true")
+    p.add_argument("--tnved", action="store_true", help="предрассчитать эмбеддинги ТН ВЭД (для run.py --tnved)")
     a = p.parse_args()
     download_models(ROOT / "models")
-    build_tnved_cache(with_emb=not a.no_emb)
+    build_tnved_cache(with_emb=a.tnved)
     sys.exit(0)

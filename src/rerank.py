@@ -52,13 +52,18 @@ def rerank_all(reranker: Reranker, queries: list[str], candidates: list[np.ndarr
     result = [np.full(len(c), np.nan, dtype=np.float32) for c in candidates]
     depth = max(len(c) for c in candidates)
     n_pairs = 0
+    probe = 5  # после стольких деклараций раунда экстраполируем его длительность
     for start in range(0, depth, round_size):
         round_res = []
-        for q, cand in zip(queries, candidates):
-            if time.perf_counter() - t0 > time_budget_s:
-                log.warning("бюджет времени реранкера исчерпан (%.0f с): раунд %d–%d откачен, "
-                            "переранжированы позиции 1–%d из %d", time.perf_counter() - t0,
-                            start + 1, start + round_size, start, depth)
+        t_round = time.perf_counter()
+        budget_left = time_budget_s - (t_round - t0)
+        for n_done, (q, cand) in enumerate(zip(queries, candidates)):
+            elapsed = time.perf_counter() - t0
+            projected = (time.perf_counter() - t_round) / n_done * len(queries) if n_done >= probe else 0.0
+            if elapsed > time_budget_s or projected > budget_left:
+                log.warning("бюджет времени реранкера (%.0f с) не позволяет завершить раунд %d–%d "
+                            "(прогноз %.0f с, прошло %.0f с): раунд откачен, переранжированы позиции 1–%d из %d",
+                            time_budget_s, start + 1, start + round_size, projected, elapsed, start, depth)
                 return result
             sl = cand[start:start + round_size]
             round_res.append(reranker.score(q, [doc_texts[j] for j in sl]) if len(sl) else None)

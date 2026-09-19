@@ -23,7 +23,7 @@ class Config:
     out_dir: Path
     models_dir: Path
     device: str = "cpu"
-    rerank_k: int = 40
+    rerank_k: int = 20             # глубина: на dev K=20 не хуже K=40, а пар вдвое меньше
     time_budget_s: float = 1200.0
     use_tnved: bool = False        # ТН ВЭД-обогащение запроса: на dev ухудшает качество, выключено
     tnved_top: int = 5

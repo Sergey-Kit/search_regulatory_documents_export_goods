@@ -29,6 +29,20 @@ DECREE_TITLES = {
               "ЕАЭС (Решение Коллегии ЕЭК № 30)",
 }
 
+# Категории списка 1661 (разделы 1–3 нумеруются по категориям Вассенаарских договорённостей;
+# разделы 4–5 — иная структура, категории не приписываются).
+CATEGORIES_1661 = {
+    "1": "специальные материалы и связанное с ними оборудование",
+    "2": "обработка материалов",
+    "3": "электроника",
+    "4": "вычислительная техника",
+    "5": "телекоммуникации и защита информации",
+    "6": "датчики и лазеры",
+    "7": "навигационное оборудование и авиационная электроника",
+    "8": "морская техника",
+    "9": "двигательные установки, космические аппараты и связанное оборудование",
+}
+
 _ITEM_PREFIX = re.compile(r"^(?:раздел\s+(\d+),\s*)?(\d+(?:\.\d+)+)\.?\s*", re.I)
 # «в пункте 6.1.6.1, 6.1.6.2 или 6.1.6.3», «подпункте "а" пункта 6.1.4.4.2», «позициях 9.1.3 или 9.1.5»
 _REF = re.compile(
@@ -46,8 +60,20 @@ class Doc:
     decree: str
     item_no: str | None
     body: str                       # исходный текст без префикса «Раздел N, x.y.z.»
+    section: str | None = None      # номер раздела для 1661
     refs: list[str] = field(default_factory=list)
     ref_texts: list[str] = field(default_factory=list)
+
+    @property
+    def category(self) -> str:
+        """Название категории списка 1661 (разделы 1–3) по первой цифре пункта; иначе пусто."""
+        if self.decree == "1661" and self.item_no and self.section in ("1", "2", "3"):
+            return CATEGORIES_1661.get(self.item_no.split(".")[0], "")
+        return ""
+
+    def text_with_category(self) -> str:
+        c = self.category
+        return f"{c}: {self.body}" if c else self.body
 
     @property
     def title(self) -> str:
@@ -68,11 +94,12 @@ class Doc:
         return " ".join(parts)
 
 
-def split_prefix(npa: str) -> tuple[str | None, str]:
+def split_prefix(npa: str) -> tuple[str | None, str, str | None]:
+    """(номер пункта, тело, номер раздела)."""
     m = _ITEM_PREFIX.match(npa)
     if not m:
-        return None, npa
-    return m.group(2), npa[m.end():]
+        return None, npa, None
+    return m.group(2), npa[m.end():], m.group(1)
 
 
 def find_refs(text: str) -> list[str]:
@@ -87,8 +114,8 @@ def find_refs(text: str) -> list[str]:
 def build_docs(regulations: list[dict]) -> list[Doc]:
     docs = []
     for r in regulations:
-        item_no, body = split_prefix(r["npa"])
-        docs.append(Doc(r["regulation_id"], str(r["decree_number"]), item_no, body.strip()))
+        item_no, body, section = split_prefix(r["npa"])
+        docs.append(Doc(r["regulation_id"], str(r["decree_number"]), item_no, body.strip(), section))
     index = {(d.decree, d.item_no): d for d in docs if d.item_no}
     for d in docs:
         d.refs = [no for no in find_refs(d.body) if no != d.item_no]

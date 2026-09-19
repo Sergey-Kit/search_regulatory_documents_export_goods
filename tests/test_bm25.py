@@ -17,3 +17,10 @@ def test_rrf_and_topk():
     assert fused[0] == fused[2]
     assert abs(fused[1] - 2 / 62) < 1e-12
     assert list(topk(a, 2)) == [0, 1]
+
+
+def test_char_ngram_tolerates_typos():
+    from src.retrieval import CharNgramIndex
+    idx = CharNgramIndex(["насос вакуумный молекулярный", "транзисторная матрица кремниевая", "зеркала лазерные"])
+    s = idx.scores("транзисторная мартица")  # опечатка
+    assert int(s.argmax()) == 1 and s[1] > 0

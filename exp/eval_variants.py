@@ -16,17 +16,24 @@ labels = {l["idx"]: l["relevant"] for l in (json.loads(l) for l in open(ROOT / "
 q_lem = [preprocess.lemmas(d["G31_1"]) for d in decs]
 bmB = BM25([preprocess.lemmas(d.text_for_bm25()) for d in docs])
 bmC = BM25([preprocess.lemmas(d.body) for d in docs])
-D = {k: np.load(C / f"doc_{k}.npy") for k in "ABC"}
+D = {k: np.load(C / f"doc_{k}.npy") for k in "ABCD"}
 Q = {"full": np.load(C / "q_full.npy"), "head": np.load(C / "q_head.npy"),
      "head150": np.load(C / "q_head150.npy"), "head400": np.load(C / "q_head400.npy"),
      "name": np.load(C / "q_name.npy")}
 NAMES = json.load(open(C / "names.json"))
-ROS = {k: np.load(C / f"ros_{k}.npy") for k in ["doc_C", "doc_B", "q_full", "q_head"]}
+ROS = {k: np.load(C / f"ros_{k}.npy") for k in ["doc_C", "doc_B", "doc_D", "q_full", "q_head"]}
+bmD = BM25([preprocess.lemmas(d.text_with_category() + " " + " ".join(d.ref_texts)) for d in docs])
+from sklearn.feature_extraction.text import TfidfVectorizer
+_tv = TfidfVectorizer(analyzer="char_wb", ngram_range=(3, 5), min_df=1, sublinear_tf=True)
+_char_docs = _tv.fit_transform([preprocess.normalize(d.text_for_bm25()) for d in docs])
+_char_q = _tv.transform([preprocess.normalize(d["G31_1"]) for d in decs])
+_char_qh = _tv.transform([preprocess.normalize(d["G31_1"])[:250] for d in decs])
+CHAR = (_char_q @ _char_docs.T).toarray(); CHAR_H = (_char_qh @ _char_docs.T).toarray()
 E = {k: np.load(C / f"exp_{k}.npy") for k in ["bm25", "dense", "rrf"]}
 EXP = json.load(open(C / "tnved_exp.json"))
 pool = {int(k): v for k, v in json.load(open(C / "pool.json")).items()}
 RR = {k: {int(i): np.array(v) for i, v in json.load(open(C / f"rerank_{k}.json")).items()}
-      for k in "ABChgijnm" if (C / f"rerank_{k}.json").exists()}
+      for k in ["A","B","C","h","g","i","j","n","m","hD"] if (C / f"rerank_{k}.json").exists()}
 
 
 def sig(x): return 1 / (1 + np.exp(-x))
@@ -35,9 +42,15 @@ def sig(x): return 1 / (1 + np.exp(-x))
 def run(cfg):
     res = []
     for i, rel in labels.items():
-        bm = bmC if cfg.get("bm25_body_only") else bmB
+        bm = bmC if cfg.get("bm25_body_only") else (bmD if cfg.get("bm25_cat") else bmB)
         s_b = bm.scores(q_lem[i])
         lists = [(s_b, cfg["w_bm25"])]
+        if cfg.get("w_bm25_head", 0) > 0:
+            lists.append((bm.scores(preprocess.lemmas(preprocess.normalize(decs[i]["G31_1"])[:250])), cfg["w_bm25_head"]))
+        if cfg.get("w_char", 0) > 0:
+            lists.append((CHAR[i], cfg["w_char"]))
+        if cfg.get("w_char_head", 0) > 0:
+            lists.append((CHAR_H[i], cfg["w_char_head"]))
         for qk in (["full", cfg.get("head", "head")] if cfg["q"] == "both" else [cfg["q"]]):
             lists.append((Q[qk][i] @ D[cfg["doc"]].T, cfg["w_dense"]))
         if cfg.get("w_ros", 0) > 0:

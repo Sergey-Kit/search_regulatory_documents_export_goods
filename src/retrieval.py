@@ -88,3 +88,21 @@ def topk(scores: np.ndarray, k: int) -> np.ndarray:
     k = min(k, len(scores))
     idx = np.argpartition(-scores, k - 1)[:k]
     return idx[np.argsort(-scores[idx], kind="stable")]
+
+
+class CharNgramIndex:
+    """TF-IDF по символьным n-граммам (3–5, внутри слов с границами).
+
+    Устойчив к опечаткам и склейкам в декларациях («СОЭДАНИЯ», «МАРТИЦА», «ЭЛЕКТРОHHЫЕ»
+    с латинскими H, «КАЧЕСТВЕКОМПЛЕКТУЮЩЕГО»), которые BM25 по леммам не видит.
+    """
+
+    def __init__(self, docs: list[str], ngram_range: tuple[int, int] = (3, 5)):
+        from sklearn.feature_extraction.text import TfidfVectorizer
+
+        self.vec = TfidfVectorizer(analyzer="char_wb", ngram_range=ngram_range, sublinear_tf=True, dtype=np.float32)
+        self.doc_matrix = self.vec.fit_transform(docs)
+
+    def scores(self, query: str) -> np.ndarray:
+        q = self.vec.transform([query])
+        return np.asarray((q @ self.doc_matrix.T).todense(), dtype=np.float32).ravel()

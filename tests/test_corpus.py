@@ -2,8 +2,19 @@ from src.corpus import build_docs, find_refs, split_prefix
 
 
 def test_split_prefix():
-    assert split_prefix("Раздел 1, 6.1.2.4.1. криогенные охладители") == ("6.1.2.4.1", "криогенные охладители")
-    assert split_prefix("Угловые измерительные приборы") == (None, "Угловые измерительные приборы")
+    assert split_prefix("Раздел 1, 6.1.2.4.1. криогенные охладители") == ("6.1.2.4.1", "криогенные охладители", "1")
+    assert split_prefix("Угловые измерительные приборы") == (None, "Угловые измерительные приборы", None)
+
+
+def test_category_only_for_sections_1_3():
+    regs = [
+        {"regulation_id": "A", "decree_number": "1661", "npa": "Раздел 1, 4.1.1. эвм"},
+        {"regulation_id": "B", "decree_number": "1661", "npa": "Раздел 4, 10.3.7. изделия со взрывчаткой"},
+        {"regulation_id": "C", "decree_number": "36", "npa": "приборы"},
+    ]
+    d = {x.regulation_id: x for x in build_docs(regs)}
+    assert d["A"].category == "вычислительная техника" and d["A"].text_with_category().startswith("вычислительная")
+    assert d["B"].category == "" and d["C"].category == ""
 
 
 def test_find_refs_lists():

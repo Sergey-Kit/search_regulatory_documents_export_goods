@@ -3,19 +3,20 @@ sys.argv = ['x']
 src = open(Path(__file__).resolve().parent / 'eval_variants.py').read().split('base = dict')[0]
 exec(src)
 base = dict(q="both", doc="C", w_bm25=1.0, w_dense=1.0, w_tnved=0, exp="rrf", rerank="h", K=40, lam=0.1)
-variants = {"итог (K20)": dict(base, K=20),
-    "RoSBERTa only (full+head), без реранкера": dict(base, rerank=None, w_bm25=0, w_dense=0, w_ros=1.0),
-    "гибрид без реранкера": dict(base, rerank=None),
-    "гибрид + RoSBERTa 0.5, без реранкера": dict(base, rerank=None, w_ros=0.5),
-    "гибрид + RoSBERTa 1.0, без реранкера": dict(base, rerank=None, w_ros=1.0),
-    "гибрид + RoSBERTa 1.0 (doc B), без реранкера": dict(base, rerank=None, w_ros=1.0, ros_doc="B"),
-    "гибрид + RoSBERTa 0.5 + реранкер": dict(base, K=20, w_ros=0.5),
-    "гибрид + RoSBERTa 1.0 + реранкер": dict(base, K=20, w_ros=1.0),
-    "гибрид + RoSBERTa 1.0 + реранкер K30": dict(base, K=30, w_ros=1.0),
+base = dict(base, w_ros=1.0)   # текущий итог: 5 списков
+new = dict(base, w_char=1.0, w_char_head=1.0, doc="D", ros_doc="D", bm25_cat=True)
+variants = {
+    "старый итог + реранкер h": dict(base, K=20),
+    "новый гибрид, без реранкера": dict(new, rerank=None),
+    "новый + реранкер h, K20": dict(new, K=20, rerank="h"),
+    "новый + реранкер h, K30": dict(new, K=30, rerank="h"),
+    "новый + реранкер h, K40": dict(new, K=40, rerank="h"),
+    "новый + реранкер hD (с категорией), K20": dict(new, K=20, rerank="hD"),
+    "новый + реранкер hD, K40": dict(new, K=40, rerank="hD"),
+    "новый + реранкер h, lam 0.3": dict(new, K=20, rerank="h", lam=0.3),
+    "новый + реранкер h, lam 1.0": dict(new, K=20, rerank="h", lam=1.0),
+    "новый + реранкер hD, lam 0.3": dict(new, K=20, rerank="hD", lam=0.3),
+    "новый + реранкер hD, lam 1.0": dict(new, K=20, rerank="hD", lam=1.0),
 }
-variants["реранкер: запрос = название"] = dict(base, K=20, rerank="n")
-variants["реранкер: название + голова"] = dict(base, K=20, rerank="m")
-variants["+name dense 1.0, без реранкера"] = dict(base, rerank=None, w_name=1.0)
-variants["без name, без реранкера"] = dict(base, rerank=None)
 for name, cfg in variants.items():
     m = run(cfg); print(f"{name:20}", {k: round(v, 3) for k, v in m.items()})

@@ -11,7 +11,7 @@ import numpy as np
 
 from . import corpus, preprocess, tnved
 from .io_utils import TOP_N, load_declarations, load_regulations, write_predictions
-from .retrieval import BM25, DenseEncoder, rrf, topk
+from .retrieval import BM25, CharNgramIndex, DenseEncoder, rrf, topk
 from .rerank import Reranker, rerank_all
 
 log = logging.getLogger("pipeline")
@@ -24,20 +24,22 @@ class Config:
     models_dir: Path
     device: str = "cpu"
     rerank_k: int = 20             # глубина: на dev K=20 не хуже K=40, а пар вдвое меньше
-    time_budget_s: float = 1200.0
+    time_budget_s: float = 1500.0  # общий бюджет (лимит задания 30 мин, запас 5 мин)
     use_tnved: bool = False        # ТН ВЭД-обогащение запроса: на dev ухудшает качество, выключено
     tnved_top: int = 5
     w_bm25: float = 1.0
     w_dense: float = 1.0           # вес каждого из двух dense-списков (полный запрос и «голова»)
     use_second_encoder: bool = True  # ru-en-RoSBERTa как второй dense: другая архитектура, другие ошибки
     w_second: float = 1.0
-    second_encoder_budget_frac: float = 0.4  # пропустить второй энкодер, если первый съел больше этой доли бюджета
+    # Второй энкодер работает примерно столько же, сколько первый: пропускаем его, если прогноз
+    # «время первого × 2 + запас» не укладывается в бюджет (на медленном CPU).
     w_tnved: float = 0.5           # вес каждого из двух ТН ВЭД-списков в RRF
     rrf_k: int = 60
     head_chars: int = 250          # «голова» декларации: название товара обычно в начале, хвост — шум
     lam: float = 0.1               # вклад гибридного ранга в итоговый score (tie-break)
     rerank_query_tnved: bool = False  # добавлять ли ТН ВЭД-расширение в запрос реранкера
-    skip_rerank: bool = False
+    skip_rerank: bool = True       # реранкер: на dev не добавляет к сильному гибриду, включается --rerank
+    w_char: float = 1.0            # вес каждого из двух списков символьных n-грамм
     fp16: bool = False
     dump_debug: bool = True
 
@@ -100,15 +102,18 @@ def run(cfg: Config) -> Path:
     q_norm = [preprocess.normalize(d["G31_1"]) for d in decls]
     q_head = [q[:cfg.head_chars] for q in q_norm]
     q_lem = [preprocess.lemmas(d["G31_1"]) for d in decls]
-    doc_bm25 = [preprocess.lemmas(d.text_for_bm25()) for d in docs]
-    # Dense: только текст позиции. Название указа в префиксе размывает эмбеддинг (проверено на dev).
-    doc_dense = [d.body for d in docs]
+    # Категория списка 1661 («вычислительная техника», «электроника»…) — короткий заголовок,
+    # который переводит позицию на «товарный» язык; длинное название указа, напротив, вредило.
+    doc_bm25 = [preprocess.lemmas(d.text_with_category() + " " + " ".join(d.ref_texts)) for d in docs]
+    doc_dense = [d.text_with_category() for d in docs]
+    doc_char = [preprocess.normalize(d.text_for_bm25()) for d in docs]
     # Реранкер: текст позиции + разрешённые ссылки; запрос — «голова» декларации, иначе при окне
     # 512 токенов усечение longest_first съедает текст позиции.
     doc_rerank = [d.text_for_bm25() for d in docs]
     t0 = _timer("препроцессинг", t0)
 
     bm25 = BM25(doc_bm25)
+    char_index = CharNgramIndex(doc_char)
     encoder = DenseEncoder(str(cfg.models_dir / "user-bge-m3"), cfg.device, fp16=cfg.fp16)
     t0 = _timer("загрузка энкодера", t0)
 
@@ -124,10 +129,10 @@ def run(cfg: Config) -> Path:
     t0 = _timer("dense-поиск по НПА (bge-m3)", t0)
 
     use_second = cfg.use_second_encoder
-    if use_second and time.perf_counter() - t_start > cfg.second_encoder_budget_frac * cfg.time_budget_s:
-        log.warning("медленное устройство: первый энкодер занял %.0f с (> %.0f%% бюджета) — второй энкодер "
-                    "RoSBERTa пропущен, чтобы уложиться в лимит времени",
-                    time.perf_counter() - t_start, 100 * cfg.second_encoder_budget_frac)
+    elapsed = time.perf_counter() - t_start
+    if use_second and elapsed * 2 + 60 > cfg.time_budget_s:
+        log.warning("медленное устройство: первый энкодер занял %.0f с, прогноз со вторым %.0f с > бюджета %.0f с — "
+                    "второй энкодер RoSBERTa пропущен", elapsed, elapsed * 2 + 60, cfg.time_budget_s)
         use_second = False
     if use_second:
         # RoSBERTa обучена с префиксами задач; CLS-пулинг и нормализация — как у bge-m3.
@@ -150,7 +155,8 @@ def run(cfg: Config) -> Path:
         s_bm25 = bm25.scores(q_lem[i])
         s_dense = q_emb[i] @ doc_emb.T
         s_dense_h = qh_emb[i] @ doc_emb.T
-        lists = [(s_bm25, cfg.w_bm25), (s_dense, cfg.w_dense), (s_dense_h, cfg.w_dense)]
+        lists = [(s_bm25, cfg.w_bm25), (s_dense, cfg.w_dense), (s_dense_h, cfg.w_dense),
+                 (char_index.scores(q_norm[i]), cfg.w_char), (char_index.scores(q_head[i]), cfg.w_char)]
         if use_second:
             lists.append((q_emb2[i] @ doc_emb2.T, cfg.w_second))
             lists.append((qh_emb2[i] @ doc_emb2.T, cfg.w_second))
